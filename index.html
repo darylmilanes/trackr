@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>BET — Budget & Expense Tracker</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="appbar">
+    <div class="appbar-inner">
+      <h1 class="brand">BET</h1>
+      <div class="appbar-actions">
+        <button id="btnOpenSettings" class="btn ghost" title="Settings">Settings</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ============ SETUP ============ -->
+    <section id="setupView" class="view">
+      <div class="panel">
+        <h2>Welcome to BET</h2>
+        <p class="muted">First, add the people sharing the expenses and your monthly expense categories with budgets.</p>
+
+        <div class="grid-2">
+          <!-- People -->
+          <div>
+            <h3>People (equal split)</h3>
+            <div id="peopleList" class="list"></div>
+            <div class="row add-row">
+              <input id="newPersonName" type="text" placeholder="Add a person (e.g., Daryl)" />
+              <button id="btnAddPerson" class="btn">Add</button>
+            </div>
+            <p class="muted small">Shares are computed automatically (2 → 50% each, 3 → 33.33% each, etc.).</p>
+          </div>
+
+          <!-- Categories -->
+          <div>
+            <h3>Expense Categories (monthly)</h3>
+            <div id="categoryList" class="list"></div>
+            <div class="row add-row">
+              <input id="newCategoryName" type="text" placeholder="Category name (e.g., Rent)" />
+              <input id="newCategoryBudget" type="number" step="0.01" min="0" placeholder="₱0.00" />
+              <button id="btnAddCategory" class="btn">Add</button>
+            </div>
+            <div class="totals">
+              <span>Total monthly budget:</span>
+              <strong id="setupTotalBudget">₱0.00</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="setup-actions">
+          <button id="btnStart" class="btn primary">Start BET</button>
+          <button id="btnResetAll" class="btn ghost" title="Clear local data">Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ APP ============ -->
+    <section id="appView" class="view hidden">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <label for="monthPicker" class="muted">Month</label>
+          <input id="monthPicker" type="month" />
+        </div>
+        <div class="toolbar-right">
+          <button id="btnAddEntry" class="btn">+ Add Entry</button>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="card">
+          <h4>Monthly Budget</h4>
+          <div class="big" id="cardTotalBudget">₱0.00</div>
+          <p class="muted small">Sum of all category budgets.</p>
+        </div>
+
+        <div class="card">
+          <h4>Actual Spend</h4>
+          <div class="big" id="cardActualSpend">₱0.00</div>
+          <p class="muted small">Sum of expenses logged this month.</p>
+        </div>
+
+        <div class="card">
+          <h4>Contributions</h4>
+          <div class="big" id="cardContributions">₱0.00</div>
+          <p class="muted small">Sum of contributions logged this month.</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Per-Person Status</h3>
+        <div id="peopleSummary" class="people-grid"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head" style="display:flex;justify-content:space-between;align-items:end;gap:8px;">
+          <h3>Category Spend This Month</h3>
+          <p class="muted small" id="catSummaryHint"></p>
+        </div>
+
+        <div class="table-wrap">
+          <table class="table" id="categorySummaryTable">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th class="right">Budget</th>
+                <th class="right">Actual</th>
+                <th class="right">Variance</th>
+              </tr>
+            </thead>
+            <tbody id="categorySummaryBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Ledger</h3>
+          <div class="panel-actions">
+            <button id="btnExportJSON" class="btn ghost">Export JSON</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="table" id="ledgerTable">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Target</th>
+                <th class="right">Amount</th>
+                <th>Notes</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="ledgerBody"></tbody>
+          </table>
+          <p id="emptyLedger" class="muted center small hidden">No entries yet this month.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ ADD ENTRY MODAL ============ -->
+  <div id="entryModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Add Entry</h3>
+        <button class="icon-btn" id="closeEntryModal" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form">
+          <label>Date
+            <input id="entryDate" type="date" />
+          </label>
+
+          <label>Target
+            <select id="entryTarget"></select>
+          </label>
+
+          <label>Amount (₱)
+            <input id="entryAmount" type="number" step="0.01" min="0" placeholder="0.00" />
+          </label>
+
+          <label>Notes (optional)
+            <input id="entryNotes" type="text" placeholder="Description or memo" />
+          </label>
+
+          <p class="muted small">If you pick a <strong>person</strong>, the amount is stored as a <strong>positive contribution</strong>. If you pick an <strong>expense category</strong>, it is stored as a <strong>negative expense</strong>.</p>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="btnSaveEntry" class="btn primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SETTINGS MODAL ============ -->
+  <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Settings</h3>
+        <button class="icon-btn" id="closeSettingsModal" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="grid-2">
+          <div>
+            <h4>People</h4>
+            <div id="settingsPeople" class="list compact"></div>
+            <div class="row add-row">
+              <input id="settingsNewPerson" type="text" placeholder="Add a person" />
+              <button id="btnSettingsAddPerson" class="btn">Add</button>
+            </div>
+            <p class="muted small">Equal split is always enforced to keep things simple.</p>
+          </div>
+
+          <div>
+            <h4>Categories (monthly budget)</h4>
+            <div id="settingsCategories" class="list compact"></div>
+            <div class="row add-row">
+              <input id="settingsNewCatName" type="text" placeholder="Category name" />
+              <input id="settingsNewCatBudget" type="number" step="0.01" min="0" placeholder="₱0.00" />
+              <button id="btnSettingsAddCat" class="btn">Add</button>
+            </div>
+          </div>
+        </div>
+        <p class="muted small">Changes apply going forward and to calculations (past months recompute to the latest budgets/people). Google Sheets sync hooks are included in code for later.</p>
+
+        <hr class="muted" style="opacity:.25;margin:12px 0;">
+        <div class="panel">
+          <h4>Backups</h4>
+          <label class="row" style="align-items:center;">
+            <input id="autoBackup" type="checkbox" style="width:auto;">
+            <span>Auto-download a JSON backup once per day</span>
+          </label>
+
+          <label style="margin-top:8px;">Cloud webhook (optional)
+            <input id="backupWebhook" type="url" placeholder="Paste Apps Script Web App URL (for Google Drive backup)" />
+          </label>
+
+          <p class="muted small">Backups run once per calendar day when you open the app.</p>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="btnSettingsSave" class="btn primary">Save</button>
+        <button id="btnSettingsReset" class="btn ghost">Reset App</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
