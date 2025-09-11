@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>BET — Budget & Expense Tracker</title>
 
   <!-- Fonts -->
@@ -237,6 +237,36 @@
     </div>
   </div>
 
+    <!-- Firebase App (core) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+
+    <!-- Firestore -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
+
+    <script>
+      // Your Firebase config
+      const firebaseConfig = {
+        apiKey: "AIzaSyAD_V2Gf2NFHZybDeGS-VCPTLm9auFuZBE",
+        authDomain: "project001-462d6.firebaseapp.com",
+        projectId: "project001-462d6",
+        storageBucket: "project001-462d6.appspot.com",
+        messagingSenderId: "216096044027",
+        appId: "1:216096044027:web:720229ff1ea2c327855f5e",
+        measurementId: "G-7M8X6GSNF7"
+      };
+
+      // Initialize Firebase
+      const app = firebase.initializeApp(firebaseConfig);
+      const db = firebase.firestore();
+    </script>
   <script src="app.js"></script>
+  <!-- Supabase scripts placed just before the closing </body> tag -->
+    <!-- Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+      window.SUPABASE_URL = "https://nlucqotklscyvlvlmdme.supabase.co";
+      window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5sdWNxb3RrbHNjeXZsdmxtZG1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc1NzgxOTEsImV4cCI6MjA3MzE1NDE5MX0.kF6ZRJiL7aWaD9TrGWMARmT0NTOSka2xNdLimVYhcBw";
+      window.STATE_ROW_ID = "main";
+    </script>
 </body>
 </html>
