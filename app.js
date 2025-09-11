@@ -95,28 +95,37 @@
     }
     function stopPolling(){ if (poller){ clearInterval(poller); poller = null; } }
 
-    // ===== Cloud pull: incremental entries feed =====
-    const CLOUD_TS_KEY = 'bet_entries_since_v1';
-    function getSinceTs() {
-      try { return localStorage.getItem(CLOUD_TS_KEY) || ''; } catch (_) { return ''; }
-    }
-    function bumpSinceTs() {
-      try { localStorage.setItem(CLOUD_TS_KEY, new Date().toISOString()); } catch (_) {}
+    // ===== Cloud pull via JSONP: incremental entries feed (CORS-free) =====
+    const CLOUD_TS_KEY = 'bet_entries_since_v2';
+    function getSinceTs() { try { return localStorage.getItem(CLOUD_TS_KEY) || ''; } catch(_) { return ''; } }
+    function setSinceTs(ts) { try { if (ts) localStorage.setItem(CLOUD_TS_KEY, ts); } catch(_) {} }
+
+    function jsonp(urlBase) {
+      return new Promise(resolve => {
+        const cb = 'bet_cb_' + Math.random().toString(36).slice(2);
+        const s = document.createElement('script');
+        window[cb] = (data) => {
+          try { delete window[cb]; } catch(_) {}
+          s.remove();
+          resolve(data);
+        };
+        const sep = urlBase.includes('?') ? '&' : '?';
+        s.src = urlBase + sep + 'cb=' + cb;
+        s.async = true;
+        document.head.appendChild(s);
+      });
     }
 
-    async function syncEntriesFromCloud() {
+    async function syncEntriesFromCloudJSONP() {
       try {
         if (!enabled()) return;
         const base = api();
         const since = getSinceTs();
-        const url = base + (base.includes('?') ? '&' : '?') +
-                    'entries=1' + (since ? '&since=' + encodeURIComponent(since) : '');
+        let url = base + (base.includes('?') ? '&' : '?') + 'entries=1';
+        if (since) url += '&since=' + encodeURIComponent(since);
 
-        // Ask the webhook for entries added since our last pull
-        const res = await fetch(url, { method: 'GET', mode: 'cors' });
-        const json = await res.json().catch(() => ({}));
-        const incoming = Array.isArray(json.data) ? json.data.map(normalize) : [];
-
+        const res = await jsonp(url);
+        const incoming = Array.isArray(res && res.data) ? res.data.map(normalize) : [];
         if (incoming.length) {
           const local = getLedger();
           const have = new Set(local.map(e => e.id));
@@ -126,19 +135,15 @@
           }
           if (changed) { setLedger(local); refreshApp(); }
         }
-
-        // Move the cursor forward (use "now" as our new watermark)
-        bumpSinceTs();
-      } catch (_) {
-        // ignore network/CORS errors and try again later
-      }
+        if (res && res.ts) setSinceTs(res.ts); // advance watermark using server time
+      } catch (_){ }
     }
 
-    // Start a small pull loop (every ~8s) + one immediate pull on load/when tab refocuses
-    setTimeout(() => { try { syncEntriesFromCloud(); } catch(e){} }, 1500);
-    setInterval(() => { try { syncEntriesFromCloud(); } catch(e){} }, 8000);
+    // boot: immediate + every 8s + when tab refocuses
+    setTimeout(() => { try { syncEntriesFromCloudJSONP(); } catch(e){} }, 1500);
+    setInterval(() => { try { syncEntriesFromCloudJSONP(); } catch(e){} }, 8000);
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) { try { syncEntriesFromCloud(); } catch(e){} }
+      if (!document.hidden) { try { syncEntriesFromCloudJSONP(); } catch(e){} }
     });
 
     return { enabled, pushEntry, pushBackup, syncFromCloudOnce, startPolling, stopPolling };
