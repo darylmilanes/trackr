@@ -171,20 +171,27 @@ input:focus, select:focus{
   position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
   background: rgba(14, 32, 36, .35);
   z-index: 100; padding: 16px;
+  overflow: auto;                /* allow overlay to scroll if needed */
+  overscroll-behavior: contain;  /* stop scroll chaining to page */
 }
 .modal.hidden{ display:none; }
 .modal-card{
   background: var(--panel); border:1px solid var(--panel-border);
   border-radius:16px; box-shadow: var(--shadow);
   width: 100%; max-width: 560px;
+  max-height: min(92dvh, 720px); /* fit on phones; use dynamic viewport units */
+  display: flex;
+  flex-direction: column;
 }
-.modal-head, .modal-foot{ padding:12px 14px; display:flex; align-items:center; justify-content:space-between; }
+.modal-head, .modal-foot{ padding:12px 14px; display:flex; align-items:center; justify-content:space-between; flex: 0 0 auto; }
 .modal-head h3{ margin:0; }
-.modal-body{ padding:14px; }
-.form label{ display:block; font-size:13px; margin:8px 0; }
-.form input, .form select{ margin-top:6px; }
+.modal-body{ padding:14px; flex: 1 1 auto; min-height: 0;                 /* allows flex child to shrink */ overflow: auto;                /* inner scrolling area */ -webkit-overflow-scrolling: touch;  /* momentum scroll on iOS */ overscroll-behavior: contain;       /* prevent rubber-banding to background */ }
 
-.setup-actions{ display:flex; gap:8px; margin-top:14px; }
+/* Lock background scroll whenever a modal is open */
+body.noscroll{
+  overflow: hidden !important;
+  touch-action: none;            /* extra iOS safety */
+}
 
 /* Utilities */
 .hidden{ display:none !important; }
