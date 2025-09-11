@@ -11,6 +11,79 @@
     LAST_MONTH: 'bet_last_month_v1'
   };
 
+  // ----- Cloud sync (Google Apps Script Web App) -----
+  const Cloud = (() => {
+    const api = () => (localStorage.getItem(LS.BACKUP_WEBHOOK) || '').trim();
+    const enabled = () => !!api();
+
+    const normalize = (r) => ({
+      id: r.id || uid('tx'),
+      date: r.date || (r.ts ? String(r.ts).slice(0,10) : todayStr()),
+      kind: r.kind || (r.categoryId ? 'expense' : 'contribution'),
+      personId: r.personId ?? (r.userId ?? r.user ?? null),
+      categoryId: r.categoryId ?? (r.category ?? null),
+      amountCents: typeof r.amountCents === 'number' ? r.amountCents : parseAmountToCents(r.amount ?? 0),
+      notes: r.notes || '',
+      createdAt: r.createdAt || r.updatedAt || new Date().toISOString()
+    });
+
+    async function fetchAll() {
+      if (!enabled()) return [];
+      const res = await fetch(api(), { method: 'GET', mode: 'cors' });
+      const json = await res.json().catch(() => ({}));
+      const data = Array.isArray(json.data) ? json.data : [];
+      return data.map(normalize);
+    }
+
+    async function pushEntry(entry) {
+      if (!enabled()) return;
+      await fetch(api(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' }, // simple request (no preflight)
+        mode: 'no-cors',
+        body: JSON.stringify({ type: 'entry', entry })
+      }).catch(()=>{ /* ignore network errors for offline */ });
+    }
+
+    async function pushBackup() {
+      if (!enabled()) return;
+      await fetch(api(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        mode: 'no-cors',
+        body: JSON.stringify({ state: getState(), ledger: getLedger() })
+      }).catch(()=>{});
+    }
+
+    let poller = null;
+    async function syncFromCloudOnce() {
+      try{
+        if (!enabled()) return;
+        const remote = await fetchAll();
+        if (!remote.length) return;
+
+        const local = getLedger();
+        const have = new Set(local.map(e => e.id));
+        let changed = false;
+        for (const r of remote) {
+          if (!have.has(r.id)) { local.push(r); changed = true; }
+        }
+        if (changed) { setLedger(local); refreshApp(); }
+      }catch(_){ }
+    }
+    function startPolling() {
+      if (!enabled()) return stopPolling();
+      if (poller) return;
+      poller = setInterval(syncFromCloudOnce, 5000);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') syncFromCloudOnce();
+      });
+    }
+    function stopPolling(){ if (poller){ clearInterval(poller); poller = null; } }
+
+    return { enabled, pushEntry, pushBackup, syncFromCloudOnce, startPolling, stopPolling };
+  })();
+
   // --- Daily backup keys ---
   LS.BACKUP_LAST    = 'bet_backup_last_v1';
   LS.BACKUP_PREF    = 'bet_backup_pref_v1';     // "1" = on, "0"/missing = off
@@ -46,8 +119,10 @@
       const url = localStorage.getItem(LS.BACKUP_WEBHOOK) || '';
       if (url){
         await fetch(url, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: payload, mode:'cors'
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          mode: 'no-cors',
+          body: payload
         }).catch(()=>{ /* ignore */ });
       }
 
@@ -292,6 +367,8 @@
     $('#monthPicker').value = last;
     refreshApp();
     maybeRunDailyBackups();
++    Cloud.syncFromCloudOnce();
++    Cloud.startPolling();
   }
 
   if (state){ initApp(); }
@@ -621,9 +698,13 @@
     populateEntryTargetSelect();
     $('#entryAmount').value = '';
     $('#entryNotes').value = '';
+    document.body.classList.add('noscroll');
     $('#entryModal').classList.remove('hidden');
   });
-  $('#closeEntryModal').addEventListener('click', ()=> $('#entryModal').classList.add('hidden'));
+  $('#closeEntryModal').addEventListener('click', ()=>{
+    $('#entryModal').classList.add('hidden');
+    document.body.classList.remove('noscroll');
+  });
 
   $('#btnSaveEntry').addEventListener('click', ()=>{
     const date = $('#entryDate').value || todayStr();
@@ -648,7 +729,11 @@
     arr.push(entry);
     setLedger(arr);
 
+    // NEW: push to Google Apps Script (fire-and-forget)
+    Cloud.pushEntry(entry);
+
     $('#entryModal').classList.add('hidden');
+    document.body.classList.remove('noscroll');
     refreshApp();
   });
 
@@ -673,11 +758,16 @@
     if (ab) ab.checked = (localStorage.getItem(LS.BACKUP_PREF) === '1');
     const wh = document.getElementById('backupWebhook');
     if (wh) wh.value = localStorage.getItem(LS.BACKUP_WEBHOOK) || '';
+    document.body.classList.add('noscroll');
     $('#settingsModal').classList.remove('hidden');
   });
-  $('#closeSettingsModal').addEventListener('click', ()=> $('#settingsModal').classList.add('hidden'));
+  $('#closeSettingsModal').addEventListener('click', ()=>{
+    $('#settingsModal').classList.add('hidden');
+    document.body.classList.remove('noscroll');
+  });
   $('#btnSettingsReset').addEventListener('click', ()=>{
     if (!confirm('This will clear all data saved locally. Continue?')) return;
+    document.body.classList.remove('noscroll');
     localStorage.removeItem(LS.STATE);
     localStorage.removeItem(LS.LEDGER);
     localStorage.removeItem(LS.LAST_MONTH);
@@ -791,7 +881,10 @@
     if (ab) localStorage.setItem(LS.BACKUP_PREF, ab.checked ? '1' : '0');
     const wh = document.getElementById('backupWebhook');
     if (wh) localStorage.setItem(LS.BACKUP_WEBHOOK, wh.value.trim());
++    Cloud.pushBackup();
++    Cloud.startPolling();
     $('#settingsModal').classList.add('hidden');
+    document.body.classList.remove('noscroll');
     refreshApp();
   });
 
@@ -804,6 +897,22 @@
   // ---------- Google Sheets Hooks (for later) ----------
   async function pushToSheets(){ /* stub */ }
   async function pullFromSheets(){ /* stub */ }
+
+  // Web webhook helpers (simple fetch wrapper)
+  const API = 'https://script.google.com/macros/s/AKfycbzt8xAISwfAMgINUaHO31RHDzyzhMeCoyLvWVFwK-ZHrz4fxePyAaG8g-B03BfBDad9Vw/exec';
+
+  async function fetchEntries(){
+    const r = await fetch(API);
+    return (await r.json()).data;
+  }
+
+  async function addEntry(entry){
+    await fetch(API, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(entry)
+    });
+  }
 
   // ---------- Helpers ----------
   function escapeHtml(s){
