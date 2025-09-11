@@ -95,6 +95,52 @@
     }
     function stopPolling(){ if (poller){ clearInterval(poller); poller = null; } }
 
+    // ===== Cloud pull: incremental entries feed =====
+    const CLOUD_TS_KEY = 'bet_entries_since_v1';
+    function getSinceTs() {
+      try { return localStorage.getItem(CLOUD_TS_KEY) || ''; } catch (_) { return ''; }
+    }
+    function bumpSinceTs() {
+      try { localStorage.setItem(CLOUD_TS_KEY, new Date().toISOString()); } catch (_) {}
+    }
+
+    async function syncEntriesFromCloud() {
+      try {
+        if (!enabled()) return;
+        const base = api();
+        const since = getSinceTs();
+        const url = base + (base.includes('?') ? '&' : '?') +
+                    'entries=1' + (since ? '&since=' + encodeURIComponent(since) : '');
+
+        // Ask the webhook for entries added since our last pull
+        const res = await fetch(url, { method: 'GET', mode: 'cors' });
+        const json = await res.json().catch(() => ({}));
+        const incoming = Array.isArray(json.data) ? json.data.map(normalize) : [];
+
+        if (incoming.length) {
+          const local = getLedger();
+          const have = new Set(local.map(e => e.id));
+          let changed = false;
+          for (const r of incoming) {
+            if (r && r.id && !have.has(r.id)) { local.push(r); changed = true; }
+          }
+          if (changed) { setLedger(local); refreshApp(); }
+        }
+
+        // Move the cursor forward (use "now" as our new watermark)
+        bumpSinceTs();
+      } catch (_) {
+        // ignore network/CORS errors and try again later
+      }
+    }
+
+    // Start a small pull loop (every ~8s) + one immediate pull on load/when tab refocuses
+    setTimeout(() => { try { syncEntriesFromCloud(); } catch(e){} }, 1500);
+    setInterval(() => { try { syncEntriesFromCloud(); } catch(e){} }, 8000);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) { try { syncEntriesFromCloud(); } catch(e){} }
+    });
+
     return { enabled, pushEntry, pushBackup, syncFromCloudOnce, startPolling, stopPolling };
   })();
 
