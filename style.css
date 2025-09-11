@@ -206,3 +206,17 @@ body.noscroll{
 .balance-neg { color: #b00020; font-weight: 700; }  /* red   */
 
 .grid-3 + .panel { margin-top: 24px; }
+
+/* iOS Safari: prevent focus zoom by keeping controls >=16px */
+@supports (-webkit-touch-callout: none) {
+  input, select, textarea {
+    font-size: 16px !important;
+    line-height: 1.35;
+  }
+  input[type="number"],
+  input[type="date"],
+  input[type="month"],
+  input[type="time"] {
+    font-size: 16px !important;
+  }
+}
