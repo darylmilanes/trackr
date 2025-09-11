@@ -57,19 +57,33 @@
 
     let poller = null;
     async function syncFromCloudOnce() {
-      try{
+      try {
         if (!enabled()) return;
-        const remote = await fetchAll();
-        if (!remote.length) return;
+        const base = api();
+        const url = base + (base.includes('?') ? '&' : '?') + 'full=1';
 
+        // Ask the webhook for the latest full snapshot (state + ledger)
+        const res = await fetch(url, { method: 'GET', mode: 'cors' });
+        const json = await res.json().catch(() => ({}));
+
+        const remoteState = json && json.state ? json.state : null;
+        const remoteLedger = Array.isArray(json && json.ledger) ? json.ledger.map(normalize) : [];
+
+        // 1) Apply people/categories/budgets from the cloud (overwrites local)
+        if (remoteState) setState(remoteState);
+
+        // 2) Merge in any entries we don't have yet
         const local = getLedger();
         const have = new Set(local.map(e => e.id));
         let changed = false;
-        for (const r of remote) {
+        for (const r of remoteLedger) {
           if (!have.has(r.id)) { local.push(r); changed = true; }
         }
-        if (changed) { setLedger(local); refreshApp(); }
-      }catch(_){ }
+        if (changed) setLedger(local);
+
+        // 3) Re-render if anything changed
+        if (remoteState || changed) refreshApp();
+      } catch (_err) { /* ignore network errors */ }
     }
     function startPolling() {
       if (!enabled()) return stopPolling();
