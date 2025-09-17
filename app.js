@@ -1,4 +1,4 @@
-/* ===== BET — Budget & Expense Tracker =====
+/* ===== Trackr — Budget & Expense Tracker =====
    Local-first; Google Sheets sync hooks included for later.
    Author: You + ChatGPT
 */
@@ -11,49 +11,220 @@
     LAST_MONTH: 'bet_last_month_v1'
   };
 
-  // --- Daily backup keys ---
-  LS.BACKUP_LAST    = 'bet_backup_last_v1';
-  LS.BACKUP_PREF    = 'bet_backup_pref_v1';     // "1" = on, "0"/missing = off
-  LS.BACKUP_WEBHOOK = 'bet_backup_webhook_v1';  // optional URL for Option B
+  // ---------- IndexedDB helper (simple key/value store) ----------
+  const DB = {
+    name: 'trackr-db', version: 1, store: 'kv', db: null,
+    init(){
+      if (this.db) return Promise.resolve();
+      return new Promise((resolve, reject)=>{
+        const req = indexedDB.open(this.name, this.version);
+        req.onupgradeneeded = (e)=>{
+          const d = e.target.result;
+          if (!d.objectStoreNames.contains(this.store)) d.createObjectStore(this.store);
+        };
+        req.onsuccess = (e)=>{ this.db = e.target.result; resolve(); };
+        req.onerror = ()=> reject(req.error);
+      });
+    },
+    async get(key){ await this.init(); return new Promise((res, rej)=>{ const tx = this.db.transaction(this.store,'readonly'); const os = tx.objectStore(this.store); const r = os.get(key); r.onsuccess = ()=> res(r.result); r.onerror = ()=> rej(r.error); }); },
+    async set(key, val){ await this.init(); return new Promise((res, rej)=>{ const tx = this.db.transaction(this.store,'readwrite'); const os = tx.objectStore(this.store); const r = os.put(val, key); r.onsuccess = ()=> res(); r.onerror = ()=> rej(r.error); }); },
+    async del(key){ await this.init(); return new Promise((res, rej)=>{ const tx = this.db.transaction(this.store,'readwrite'); const os = tx.objectStore(this.store); const r = os.delete(key); r.onsuccess = ()=> res(); r.onerror = ()=> rej(r.error); }); }
+  };
 
-  function getBackupPayload(){
-    return JSON.stringify({ state: getState(), ledger: getLedger() }, null, 2);
-  }
-  function doLocalDownload(filename, text){
-    const blob = new Blob([text], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
-  }
-  function todayKey(){ return new Date().toISOString().slice(0,10); }
-
-  async function maybeRunDailyBackups(){
+  // Try to restore state/ledger from IndexedDB into localStorage at startup.
+  (async function restoreFromIndexedDB(){
     try{
-      const pref = localStorage.getItem(LS.BACKUP_PREF) === '1';
-      const last = localStorage.getItem(LS.BACKUP_LAST);
-      const today = todayKey();
-      if (last === today) return;
-
-      const payload = getBackupPayload();
-
-      // 1) Local file auto-download (if enabled)
-      if (pref){
-        doLocalDownload(`BET-backup-${today}.json`, payload);
-      }
-
-      // 2) Optional cloud webhook (Option B)
-      const url = localStorage.getItem(LS.BACKUP_WEBHOOK) || '';
-      if (url){
-        await fetch(url, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: payload, mode:'cors'
-        }).catch(()=>{ /* ignore */ });
-      }
-
-      localStorage.setItem(LS.BACKUP_LAST, today);
+      await DB.init();
+      const s = await DB.get(LS.STATE);
+      if (s !== undefined && s !== null) localStorage.setItem(LS.STATE, JSON.stringify(s));
+      const l = await DB.get(LS.LEDGER);
+      if (l !== undefined && l !== null) localStorage.setItem(LS.LEDGER, JSON.stringify(l));
     }catch(_){ /* ignore */ }
-  }
+  })();
+
+  // ----- Cloud sync (Google Apps Script Web App) -----
+  const Cloud = (() => {
+    const api = () => (localStorage.getItem(LS.BACKUP_WEBHOOK) || '').trim();
+    const enabled = () => !!api();
+
+    const normalize = (r) => ({
+      id: r.id || uid('tx'),
+      date: r.date || (r.ts ? String(r.ts).slice(0,10) : todayStr()),
+      kind: r.kind || (r.categoryId ? 'expense' : 'contribution'),
+      personId: r.personId ?? (r.userId ?? r.user ?? null),
+      categoryId: r.categoryId ?? (r.category ?? null),
+      amountCents: typeof r.amountCents === 'number' ? r.amountCents : parseAmountToCents(r.amount ?? 0),
+      notes: r.notes || '',
+      createdAt: r.createdAt || r.updatedAt || new Date().toISOString()
+    });
+
+    async function fetchAll() {
+      if (!enabled()) return [];
+      const res = await fetch(api(), { method: 'GET', mode: 'cors' });
+      const json = await res.json().catch(() => ({}));
+      const data = Array.isArray(json.data) ? json.data : [];
+      return data.map(normalize);
+    }
+
+    async function pushEntry(entry) {
+      if (!enabled()) return;
+      await fetch(api(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' }, // simple request (no preflight)
+        mode: 'no-cors',
+        body: JSON.stringify({ type: 'entry', entry })
+      }).catch(()=>{ /* ignore network errors for offline */ });
+    }
+
+    async function pushBackup() {
+      if (!enabled()) return;
+      await fetch(api(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        mode: 'no-cors',
+        body: JSON.stringify({ state: getState(), ledger: getLedger() })
+      }).catch(()=>{});
+    }
+
+    let poller = null;
+    async function syncFromCloudOnce() {
+      try {
+        if (!enabled()) return;
+        const base = api();
+        const url = base + (base.includes('?') ? '&' : '?') + 'full=1';
+
+        // Ask the webhook for the latest full snapshot (state + ledger)
+        const res = await fetch(url, { method: 'GET', mode: 'cors' });
+        const json = await res.json().catch(() => ({}));
+
+        const remoteState = json && json.state ? json.state : null;
+        const remoteLedger = Array.isArray(json && json.ledger) ? json.ledger.map(normalize) : [];
+
+        // 1) Apply people/categories/budgets from the cloud (overwrites local)
+        if (remoteState) setState(remoteState);
+
+        // 2) Merge in any entries we don't have yet
+        const local = getLedger();
+        const have = new Set(local.map(e => e.id));
+        let changed = false;
+        for (const r of remoteLedger) {
+          if (!have.has(r.id)) { local.push(r); changed = true; }
+        }
+        if (changed) setLedger(local);
+
+        // 3) Re-render if anything changed
+        if (remoteState || changed) refreshApp();
+      } catch (_err) { /* ignore network errors */ }
+    }
+    function startPolling() {
+      if (!enabled()) return stopPolling();
+      if (poller) return;
+      poller = setInterval(syncFromCloudOnce, 5000);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') syncFromCloudOnce();
+      });
+    }
+    function stopPolling(){ if (poller){ clearInterval(poller); poller = null; } }
+
+    // ===== Cloud pull via JSONP: incremental entries feed (CORS-free) =====
+    const CLOUD_TS_KEY = 'bet_entries_since_v2';
+    function getSinceTs() { try { return localStorage.getItem(CLOUD_TS_KEY) || ''; } catch(_) { return ''; } }
+    function setSinceTs(ts) { try { if (ts) localStorage.setItem(CLOUD_TS_KEY, ts); } catch(_) {} }
+
+    function jsonp(urlBase) {
+      return new Promise(resolve => {
+        const cb = 'bet_cb_' + Math.random().toString(36).slice(2);
+        const s = document.createElement('script');
+        window[cb] = (data) => {
+          try { delete window[cb]; } catch(_) {}
+          s.remove();
+          resolve(data);
+        };
+        const sep = urlBase.includes('?') ? '&' : '?';
+        s.src = urlBase + sep + 'cb=' + cb;
+        s.async = true;
+        document.head.appendChild(s);
+      });
+    }
+
+    async function syncEntriesFromCloudJSONP() {
+      try {
+        if (!enabled()) return;
+        const base = api();
+        const since = getSinceTs();
+        let url = base + (base.includes('?') ? '&' : '?') + 'entries=1';
+        if (since) url += '&since=' + encodeURIComponent(since);
+
+        const res = await jsonp(url);
+        const incoming = Array.isArray(res && res.data) ? res.data.map(normalize) : [];
+        if (incoming.length) {
+          const local = getLedger();
+          const have = new Set(local.map(e => e.id));
+          let changed = false;
+          for (const r of incoming) {
+            if (r && r.id && !have.has(r.id)) { local.push(r); changed = true; }
+          }
+          if (changed) { setLedger(local); refreshApp(); }
+        }
+        if (res && res.ts) setSinceTs(res.ts); // advance watermark using server time
+      } catch (_){ }
+    }
+
+    // boot: immediate + every 8s + when tab refocuses
+    setTimeout(() => { try { syncEntriesFromCloudJSONP(); } catch(e){} }, 1500);
+    setInterval(() => { try { syncEntriesFromCloudJSONP(); } catch(e){} }, 8000);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) { try { syncEntriesFromCloudJSONP(); } catch(e){} }
+    });
+
+    return { enabled, pushEntry, pushBackup, syncFromCloudOnce, startPolling, stopPolling };
+  })();
+
+  // --- Daily backup keys ---
+  // LS.BACKUP_LAST    = 'bet_backup_last_v1';
+  // LS.BACKUP_PREF    = 'bet_backup_pref_v1';     // "1" = on, "0"/missing = off
+  // LS.BACKUP_WEBHOOK = 'bet_backup_webhook_v1';  // optional URL for Option B
+
+  // function getBackupPayload(){
+  //   return JSON.stringify({ state: getState(), ledger: getLedger() }, null, 2);
+  // }
+  // function doLocalDownload(filename, text){
+  //   const blob = new Blob([text], {type:'application/json'});
+  //   const url = URL.createObjectURL(blob);
+  //   const a = document.createElement('a');
+  //   a.href = url; a.download = filename; a.click();
+  //   URL.revokeObjectURL(url);
+  // }
+  // function todayKey(){ return new Date().toISOString().slice(0,10); }
+  //
+  // async function maybeRunDailyBackups(){
+  //   try{
+  //     const pref = localStorage.getItem(LS.BACKUP_PREF) === '1';
+  //     const last = localStorage.getItem(LS.BACKUP_LAST);
+  //     const today = todayKey();
+  //     if (last === today) return;
+  //
+  //     const payload = getBackupPayload();
+  //
+  //     // 1) Local file auto-download (if enabled)
+  //     if (pref){
+  //       doLocalDownload(`BET-backup-${today}.json`, payload);
+  //     }
+  //
+  //     // 2) Optional cloud webhook (Option B)
+  //     const url = localStorage.getItem(LS.BACKUP_WEBHOOK) || '';
+  //     if (url){
+  //       await fetch(url, {
+  //         method: 'POST',
+  //         headers: { 'Content-Type': 'text/plain' },
+  //         mode: 'no-cors',
+  //         body: payload
+  //       }).catch(()=>{ /* ignore */ });
+  //     }
+  //
+  //     localStorage.setItem(LS.BACKUP_LAST, today);
+  //   }catch(_){ /* ignore */ }
+  // }
 
   const $ = s => document.querySelector(s);
   const $$ = s => Array.from(document.querySelectorAll(s));
@@ -106,8 +277,9 @@
     return s ? JSON.parse(s) : null;
   };
   const setState = (state) => {
-  localStorage.setItem(LS.STATE, JSON.stringify(state));
-  if (typeof cloudSync !== 'undefined' && cloudSync.push) cloudSync.push();
+    try{ localStorage.setItem(LS.STATE, JSON.stringify(state)); }catch(_){ }
+    // async mirror to IndexedDB
+    DB.set(LS.STATE, state).catch(()=>{});
   };
 
   const getLedger = () => {
@@ -115,8 +287,8 @@
     return s ? JSON.parse(s) : [];
   };
   const setLedger = (arr) => {
-  localStorage.setItem(LS.LEDGER, JSON.stringify(arr));
-  if (typeof cloudSync !== 'undefined' && cloudSync.push) cloudSync.push();
+    try{ localStorage.setItem(LS.LEDGER, JSON.stringify(arr)); }catch(_){ }
+    DB.set(LS.LEDGER, arr).catch(()=>{});
   };
 
   const setLastMonth = (m) => localStorage.setItem(LS.LAST_MONTH, m);
@@ -281,11 +453,10 @@
 
   $('#btnResetAll').addEventListener('click', ()=>{
     if (!confirm('This will clear all data saved locally. Continue?')) return;
-  localStorage.removeItem(LS.STATE);
-  localStorage.removeItem(LS.LEDGER);
-  localStorage.removeItem(LS.LAST_MONTH);
-  if (typeof cloudSync !== 'undefined' && cloudSync.push) cloudSync.push();
-  location.reload();
+    localStorage.removeItem(LS.STATE);
+    localStorage.removeItem(LS.LEDGER);
+    localStorage.removeItem(LS.LAST_MONTH);
+    location.reload();
   });
 
   // ---------- App View Logic ----------
@@ -294,7 +465,7 @@
     const last = getLastMonth() || monthKeyToday();
     $('#monthPicker').value = last;
     refreshApp();
-    maybeRunDailyBackups();
+    // Backups and cloud sync removed
   }
 
   if (state){ initApp(); }
@@ -624,9 +795,13 @@
     populateEntryTargetSelect();
     $('#entryAmount').value = '';
     $('#entryNotes').value = '';
+    document.body.classList.add('noscroll');
     $('#entryModal').classList.remove('hidden');
   });
-  $('#closeEntryModal').addEventListener('click', ()=> $('#entryModal').classList.add('hidden'));
+  $('#closeEntryModal').addEventListener('click', ()=>{
+    $('#entryModal').classList.add('hidden');
+    document.body.classList.remove('noscroll');
+  });
 
   $('#btnSaveEntry').addEventListener('click', ()=>{
     const date = $('#entryDate').value || todayStr();
@@ -651,7 +826,11 @@
     arr.push(entry);
     setLedger(arr);
 
+    // NEW: push to Google Apps Script (fire-and-forget)
+    Cloud.pushEntry(entry);
+
     $('#entryModal').classList.add('hidden');
+    document.body.classList.remove('noscroll');
     refreshApp();
   });
 
@@ -676,11 +855,16 @@
     if (ab) ab.checked = (localStorage.getItem(LS.BACKUP_PREF) === '1');
     const wh = document.getElementById('backupWebhook');
     if (wh) wh.value = localStorage.getItem(LS.BACKUP_WEBHOOK) || '';
+    document.body.classList.add('noscroll');
     $('#settingsModal').classList.remove('hidden');
   });
-  $('#closeSettingsModal').addEventListener('click', ()=> $('#settingsModal').classList.add('hidden'));
+  $('#closeSettingsModal').addEventListener('click', ()=>{
+    $('#settingsModal').classList.add('hidden');
+    document.body.classList.remove('noscroll');
+  });
   $('#btnSettingsReset').addEventListener('click', ()=>{
     if (!confirm('This will clear all data saved locally. Continue?')) return;
+    document.body.classList.remove('noscroll');
     localStorage.removeItem(LS.STATE);
     localStorage.removeItem(LS.LEDGER);
     localStorage.removeItem(LS.LAST_MONTH);
@@ -783,30 +967,38 @@
       if (e.target.classList.contains('del-set-cat')){
         const id = e.target.dataset.id;
         if (st.categories.length === 1){ alert('At least one category is required.'); return; }
-        st.categories = st.categories.filter(x=> x.id!==id);
+        st.categories = st.categories.filter(x=>x.id!==id);
         setState(st); renderSettings(); refreshApp();
       }
     });
   }
 
   $('#btnSettingsSave').addEventListener('click', ()=>{
-    const ab = document.getElementById('autoBackup');
-    if (ab) localStorage.setItem(LS.BACKUP_PREF, ab.checked ? '1' : '0');
-    const wh = document.getElementById('backupWebhook');
-    if (wh) localStorage.setItem(LS.BACKUP_WEBHOOK, wh.value.trim());
+    // Backups removed from settings
     $('#settingsModal').classList.add('hidden');
+    document.body.classList.remove('noscroll');
     refreshApp();
-  });
-
-  // ---------- Export ----------
-  $('#btnExportJSON').addEventListener('click', ()=>{
-    const ts = new Date().toISOString().replace(/[:.]/g,'-');
-    doLocalDownload(`BET-export-${ts}.json`, getBackupPayload());
   });
 
   // ---------- Google Sheets Hooks (for later) ----------
   async function pushToSheets(){ /* stub */ }
   async function pullFromSheets(){ /* stub */ }
+
+  // Web webhook helpers (simple fetch wrapper)
+  const API = 'https://script.google.com/macros/s/AKfycbzt8xAISwfAMgINUaHO31RHDzyzhMeCoyLvWVFwK-ZHrz4fxePyAaG8g-B03BfBDad9Vw/exec';
+
+  async function fetchEntries(){
+    const r = await fetch(API);
+    return (await r.json()).data;
+  }
+
+  async function addEntry(entry){
+    await fetch(API, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(entry)
+    });
+  }
 
   // ---------- Helpers ----------
   function escapeHtml(s){
@@ -817,103 +1009,27 @@
 
   // Press Enter/Return to "Add" when adding categories (Setup & Settings)
   (function bindEnterForCategoryAdd(){
-    const bindEnterToClick = (inputIds, buttonId) => {
-      const handler = (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-          e.preventDefault();
-          const btn = document.getElementById(buttonId);
-          if (btn) btn.click();
-        }
-      };
-      inputIds.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener('keydown', handler);
-      });
-    };
+    const container = document.getElementById('categoryList');
+    const addBtn = document.getElementById('btnAddCategory');
+    if (!container || !addBtn) return;
 
-    // Setup screen inputs → Add Category button
-    bindEnterToClick(['newCategoryName','newCategoryBudget'], 'btnAddCategory');
+    // Intercept Enter key inside any input within the category list/add-row.
+    // Instead of moving focus to the amount field, we add the category and
+    // focus the name input of the newly created add-row.
+    container.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const tgt = e.target;
+      if (!tgt || (tgt.tagName !== 'INPUT' && tgt.tagName !== 'TEXTAREA')) return;
+      e.preventDefault();
+      // Trigger the same action as clicking the Add Category button
+      addBtn.click();
 
-    // Settings modal inputs → Add Category button
-    bindEnterToClick(['settingsNewCatName','settingsNewCatBudget'], 'btnSettingsAddCat');
-  })();
-})();
-
-/* ===== Supabase Cloud Sync ===== */
-(() => {
-  if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
-    console.warn("[CloudSync] Supabase keys not set. Skipping cloud sync.");
-    return;
-  }
-
-  const client = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-  const ROW_ID = window.STATE_ROW_ID || "main";
-  const LS_KEY = "bet_state";
-
-  // Default: store state in localStorage
-  function getLocalState() {
-    try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); }
-    catch { return {}; }
-  }
-  function applyState(next) {
-    localStorage.setItem(LS_KEY, JSON.stringify(next || {}));
-    // Fire an event so your app can re-render from this new state
-    window.dispatchEvent(new CustomEvent("state:changed", { detail: next || {} }));
-  }
-
-  // Allow override if your app already has its own functions
-  const getState = window.getLocalState || getLocalState;
-  const setState = window.applyState || applyState;
-
-  // Push local state up to Supabase
-  window.cloudSync = {
-    async push(newState) {
-      const payload = newState || getState();
-      const { error } = await client
-        .from("app_state")
-        .upsert({ id: ROW_ID, payload, updated_at: new Date().toISOString() })
-        .select();
-      if (error) console.error("[CloudSync] push error:", error);
-    }
-  };
-
-  // Pull from Supabase on load
-  async function initialPull() {
-    const { data, error } = await client
-      .from("app_state")
-      .select("payload")
-      .eq("id", ROW_ID)
-      .maybeSingle();
-    if (error) {
-      console.warn("[CloudSync] initial pull error:", error.message);
-      return;
-    }
-    if (data && data.payload) {
-      setState(data.payload);
-    }
-  }
-
-  // Subscribe to realtime updates
-  function subscribeRealtime() {
-    client
-      .channel("realtime:app_state:" + ROW_ID)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "app_state", filter: `id=eq.${ROW_ID}` },
-        (payload) => {
-          if (payload?.new?.payload) {
-            setState(payload.new.payload);
-          } else {
-            initialPull();
-          }
-        }
-      )
-      .subscribe();
-  }
-
-  (async () => {
-    await initialPull();
-    subscribeRealtime();
-    console.log("[CloudSync] Supabase realtime sync ready.");
+      // After the new row is created, focus its name input. Small timeout
+      // ensures DOM insertion by existing add handler has completed.
+      setTimeout(() => {
+        const newName = container.querySelector('.add-row input[type="text"], .add-row input');
+        if (newName) newName.focus();
+      }, 50);
+    });
   })();
 })();
