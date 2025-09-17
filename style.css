@@ -94,6 +94,9 @@ p{ margin:6px 0; }
 .row{ display:flex; gap:8px; align-items:center; }
 .add-row input[type="text"], .add-row input[type="number"]{ flex:1; }
 
+/* Add spacing between the list of people/categories and the add-row in the setup view */
+#setupView .add-row { margin-top: 24px; }
+
 /* Inputs */
 input, select{
   width:100%; padding:10px 12px; border-radius:12px;
@@ -187,10 +190,169 @@ input:focus, select:focus{
 .modal-head h3{ margin:0; }
 .modal-body{ padding:14px; flex: 1 1 auto; min-height: 0;                 /* allows flex child to shrink */ overflow: auto;                /* inner scrolling area */ -webkit-overflow-scrolling: touch;  /* momentum scroll on iOS */ overscroll-behavior: contain;       /* prevent rubber-banding to background */ }
 
+/* Increase Settings modal overlay opacity and make its card more opaque (only affects #settingsModal) */
+#settingsModal {
+  background: rgba(14, 32, 36, 0.6); /* stronger overlay than other modals */
+}
+#settingsModal .modal-card {
+  background: rgba(250, 254, 255, 0.98); /* make settings card nearly opaque */
+}
+
+/* Consistent vertical spacing inside Settings modal */
+#settingsModal .modal-body label { display:block; }
+#settingsModal .modal-body input,
+#settingsModal .modal-body select,
+#settingsModal .modal-body textarea {
+  margin-bottom: 16px; /* consistent spacing after each control */
+  display: block;
+}
+#settingsModal .modal-body .row,
+#settingsModal .modal-body .add-row,
+#settingsModal .modal-body .list,
+#settingsModal .modal-body .totals {
+  margin-bottom: 16px; /* spacing between groups */
+}
+#settingsModal .modal-body .list .item { margin-bottom: 8px; } /* slightly smaller between list items */
+
+/* Remove extra outer boxes for inputs inside Settings modal */
+#settingsModal .modal-body .list .item,
+#settingsModal .modal-body .add-row,
+#settingsModal .modal-body .row {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Ensure inputs keep their own visible box */
+#settingsModal .modal-body .list .item input,
+#settingsModal .modal-body .add-row input,
+#settingsModal .modal-body .row input {
+  background: #fff;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+/* Keep spacing between list items when their outer boxes are removed */
+#settingsModal .modal-body .list { padding-top: 6px; }
+#settingsModal .modal-body .list .item { margin-bottom: 12px; }
+
 /* Lock background scroll whenever a modal is open */
 body.noscroll{
   overflow: hidden !important;
   touch-action: none;            /* extra iOS safety */
+}
+
+/* --- Settings Modal Cleanup --- */
+#settingsModal .modal-card {
+  background: #fff;                /* pure white, consistent with rest of UI */
+  border-radius: 14px;             /* slightly smaller radius for tighter look */
+  box-shadow: 0 8px 28px rgba(0,0,0,0.12);
+  padding: 0;                      /* let inner spacing handle layout */
+}
+
+#settingsModal .modal-head,
+#settingsModal .modal-foot {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--panel-border);
+}
+#settingsModal .modal-foot {
+  border-top: 1px solid var(--panel-border);
+  border-bottom: none;
+}
+
+#settingsModal .modal-body {
+  padding: 20px;
+}
+
+/* Settings modal layout: stack sections vertically and enforce uniform spacing/sizing */
+#settingsModal .modal-body .grid-2 {
+  display: grid;
+  grid-template-columns: 1fr; /* stack People above Categories */
+  gap: 12px;                  /* consistent vertical gap */
+}
+
+#settingsModal .modal-body input,
+#settingsModal .modal-body select,
+#settingsModal .modal-body textarea {
+  margin-bottom: 12px;       /* uniform spacing */
+  padding: 10px 12px;        /* consistent inner padding */
+  height: 40px;              /* consistent control height */
+  box-sizing: border-box;
+  width: 100%;
+}
+#settingsModal .modal-body textarea {
+  height: 100px;            /* larger multiline area */
+  padding-top: 10px;
+}
+
+/* Ensure input-with-button rows align and keep same spacing */
+#settingsModal .modal-body .row,
+#settingsModal .modal-body .add-row,
+#settingsModal .modal-body .list,
+#settingsModal .modal-body .totals {
+  margin-bottom: 12px;      /* uniform spacing between groups */
+}
+
+#settingsModal .modal-body .list .item {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+}
+
+/* Smaller tweaks for inputs inside add-row (button groups) so text inputs keep height */
+#settingsModal .modal-body .add-row input[type="text"],
+#settingsModal .modal-body .add-row input[type="number"] {
+  height: 40px;
+}
+
+/* Uniform control styles */
+#settingsModal .modal-body input,
+#settingsModal .modal-body select,
+#settingsModal .modal-body textarea {
+  width: 100%;
+  margin: 0 0 14px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.4;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+/* Label spacing + tone down */
+#settingsModal .modal-body label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 6px;
+  display: block;
+}
+
+/* Lists inside settings: tighter, cleaner */
+#settingsModal .modal-body .list {
+  gap: 6px;
+  margin-bottom: 14px;
+}
+#settingsModal .modal-body .list .item {
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+/* Rows / groups: more breathing space */
+#settingsModal .modal-body .row,
+#settingsModal .modal-body .add-row,
+#settingsModal .modal-body .totals {
+  margin-bottom: 18px;
+}
+
+/* Buttons inside settings: subtle */
+#settingsModal .btn {
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
 }
 
 /* Utilities */
