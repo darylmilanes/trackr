@@ -1,4 +1,4 @@
-const CACHE_NAME = 'trackr-shell-v2';
+const CACHE_NAME = 'trackr-shell-v3';
 const PRECACHE_URLS = [
   '/',
   '/index.html',
@@ -12,7 +12,7 @@ const PRECACHE_URLS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
+    caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE_URLS))
   );
   self.skipWaiting();
 });
@@ -26,41 +26,47 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Utility: serve from cache, fallback to network
-async function cacheFirst(request){
+async function cacheFirst(request) {
   const cached = await caches.match(request);
   if (cached) return cached;
-  const response = await fetch(request);
-  const copy = response.clone();
-  caches.open(CACHE_NAME).then(c => c.put(request, copy));
-  return response;
+  try {
+    const response = await fetch(request);
+    const copy = response.clone();
+    caches.open(CACHE_NAME).then(c => c.put(request, copy));
+    return response;
+  } catch (err) {
+    return caches.match('/offline.html');
+  }
 }
 
 self.addEventListener('fetch', (event) => {
   const request = event.request;
-  // Navigation requests: try network first, fallback to cache/offline page
+
+  // Handle navigations (page loads, address bar, etc.)
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request).then(resp => {
-        // Update cache for navigation
         const copy = resp.clone();
         caches.open(CACHE_NAME).then(c => c.put(request, copy));
         return resp;
       }).catch(async () => {
-        // If offline, serve cached index.html or offline.html
+        // Try both "/" and "/index.html"
+        const cachedRoot = await caches.match('/');
         const cachedIndex = await caches.match('/index.html');
-        return cachedIndex || caches.match('/offline.html');
+        return cachedRoot || cachedIndex || caches.match('/offline.html');
       })
     );
     return;
   }
 
-  // For other requests, use cache-first for static assets (CSS/JS/PNG)
-  if (request.destination === 'style' || request.destination === 'script' || request.destination === 'image'){
+  // Cache-first for styles, scripts, images
+  if (['style', 'script', 'image'].includes(request.destination)) {
     event.respondWith(cacheFirst(request));
     return;
   }
 
-  // Fallback to network for anything else
-  event.respondWith(fetch(request).catch(()=>caches.match(request)));
+  // Fallback to network or cache
+  event.respondWith(
+    fetch(request).catch(() => caches.match(request))
+  );
 });
