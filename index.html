@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>BET — Budget & Expense Tracker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <title>Trackr — Budget & Expense Tracker</title>
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,7 +15,7 @@
 <body>
   <header class="appbar">
     <div class="appbar-inner">
-      <h1 class="brand">BET</h1>
+      <h1 class="brand">Trackr</h1>
       <div class="appbar-actions">
         <button id="btnOpenSettings" class="btn ghost" title="Settings">Settings</button>
       </div>
@@ -26,7 +26,7 @@
     <!-- ============ SETUP ============ -->
     <section id="setupView" class="view">
       <div class="panel">
-        <h2>Welcome to BET</h2>
+        <h2>Welcome to Trackr</h2>
         <p class="muted">First, add the people sharing the expenses and your monthly expense categories with budgets.</p>
 
         <div class="grid-2">
@@ -58,7 +58,7 @@
         </div>
 
         <div class="setup-actions">
-          <button id="btnStart" class="btn primary">Start BET</button>
+          <button id="btnStart" class="btn primary">Start Trackr</button>
           <button id="btnResetAll" class="btn ghost" title="Clear local data">Reset</button>
         </div>
       </div>
@@ -125,9 +125,6 @@
       <div class="panel">
         <div class="panel-head">
           <h3>Ledger</h3>
-          <div class="panel-actions">
-            <button id="btnExportJSON" class="btn ghost">Export JSON</button>
-          </div>
         </div>
 
         <div class="table-wrap">
@@ -215,20 +212,8 @@
         </div>
         <p class="muted small">Changes apply going forward and to calculations (past months recompute to the latest budgets/people). Google Sheets sync hooks are included in code for later.</p>
 
-        <hr class="muted" style="opacity:.25;margin:12px 0;">
-        <div class="panel">
-          <h4>Backups</h4>
-          <label class="row" style="align-items:center;">
-            <input id="autoBackup" type="checkbox" style="width:auto;">
-            <span>Auto-download a JSON backup once per day</span>
-          </label>
+        <!-- Backups UI removed -->
 
-          <label style="margin-top:8px;">Cloud webhook (optional)
-            <input id="backupWebhook" type="url" placeholder="Paste Apps Script Web App URL (for Google Drive backup)" />
-          </label>
-
-          <p class="muted small">Backups run once per calendar day when you open the app.</p>
-        </div>
       </div>
       <div class="modal-foot">
         <button id="btnSettingsSave" class="btn primary">Save</button>
@@ -237,36 +222,6 @@
     </div>
   </div>
 
-    <!-- Firebase App (core) -->
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
-
-    <!-- Firestore -->
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
-
-    <script>
-      // Your Firebase config
-      const firebaseConfig = {
-        apiKey: "AIzaSyAD_V2Gf2NFHZybDeGS-VCPTLm9auFuZBE",
-        authDomain: "project001-462d6.firebaseapp.com",
-        projectId: "project001-462d6",
-        storageBucket: "project001-462d6.appspot.com",
-        messagingSenderId: "216096044027",
-        appId: "1:216096044027:web:720229ff1ea2c327855f5e",
-        measurementId: "G-7M8X6GSNF7"
-      };
-
-      // Initialize Firebase
-      const app = firebase.initializeApp(firebaseConfig);
-      const db = firebase.firestore();
-    </script>
   <script src="app.js"></script>
-  <!-- Supabase scripts placed just before the closing </body> tag -->
-    <!-- Supabase JS -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script>
-      window.SUPABASE_URL = "https://nlucqotklscyvlvlmdme.supabase.co";
-      window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5sdWNxb3RrbHNjeXZsdmxtZG1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc1NzgxOTEsImV4cCI6MjA3MzE1NDE5MX0.kF6ZRJiL7aWaD9TrGWMARmT0NTOSka2xNdLimVYhcBw";
-      window.STATE_ROW_ID = "main";
-    </script>
 </body>
 </html>
