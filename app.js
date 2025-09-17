@@ -248,6 +248,15 @@
 
   const formatPHP = cents => (cents/100).toLocaleString('en-PH', {style:'currency', currency:'PHP'});
 
+  // Set Cash on Hand display (expects cents)
+  function setCashOnHand(cashCents){
+    const el = document.getElementById('cardCashOnHand');
+    if (!el) return;
+    el.textContent = formatPHP(cashCents);
+    el.classList.remove('balance-pos','balance-neg');
+    el.classList.add(cashCents >= 0 ? 'balance-pos' : 'balance-neg');
+  }
+
   const uid = (prefix='id') => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,7)}`;
 
   const clone = obj => JSON.parse(JSON.stringify(obj));
@@ -460,6 +469,32 @@
   });
 
   // ---------- App View Logic ----------
+  function updateSummaryCards(){
+    const st = getState();
+    const ledger = getLedger();
+    const month = $('#monthPicker').value || monthKeyToday();
+    setLastMonth(month);
+
+    // Cards
+    const totalBudget = st.categories.reduce((s,c)=> s + (c.budgetCents||0), 0);
+    $('#cardTotalBudget').textContent = formatPHP(totalBudget);
+
+    const monthEntries = ledger.filter(e=> monthKeyFromDate(e.date) === month);
+    const actualSpend = monthEntries
+      .filter(e=> e.kind==='expense')
+      .reduce((s,e)=> s + Math.abs(e.amountCents), 0);
+    $('#cardActualSpend').textContent = formatPHP(actualSpend);
+
+    const contributions = monthEntries
+      .filter(e=> e.kind==='contribution')
+      .reduce((s,e)=> s + e.amountCents, 0);
+    $('#cardContributions').textContent = formatPHP(contributions);
+
+    // Compute and display Cash on Hand = Contributions - Actual Spend (in cents)
+    const cashCents = contributions - actualSpend;
+    setCashOnHand(cashCents);
+  }
+
   function initApp(){
     // Month picker
     const last = getLastMonth() || monthKeyToday();
@@ -467,6 +502,10 @@
     refreshApp();
     // Backups and cloud sync removed
   }
+
+  // ensure cash updates whenever core totals change
+  const origRefreshApp = refreshApp;
+  refreshApp = function(){ origRefreshApp(); };
 
   if (state){ initApp(); }
 
@@ -491,6 +530,10 @@
       .filter(e=> e.kind==='contribution')
       .reduce((s,e)=> s + e.amountCents, 0);
     $('#cardContributions').textContent = formatPHP(contributions);
+
+    // Compute and display Cash on Hand = Contributions - Actual Spend (in cents)
+    const cashCents = contributions - actualSpend;
+    setCashOnHand(cashCents);
 
     // People summary (with carryover)
     renderPeopleSummary(month);
@@ -855,6 +898,8 @@
     if (ab) ab.checked = (localStorage.getItem(LS.BACKUP_PREF) === '1');
     const wh = document.getElementById('backupWebhook');
     if (wh) wh.value = localStorage.getItem(LS.BACKUP_WEBHOOK) || '';
+    // Reattach export/import listeners in case DOM was re-rendered
+    if (typeof attachExportImportHandlers === 'function') attachExportImportHandlers();
     document.body.classList.add('noscroll');
     $('#settingsModal').classList.remove('hidden');
   });
@@ -1032,4 +1077,121 @@
       }, 50);
     });
   })();
+
+  // Export/Import JSON in Settings (guarded handlers)
+  function attachExportImportHandlers(){
+    const settingsModal = document.getElementById('settingsModal');
+
+    // Helper to download payload
+    const doDownload = (filename, obj) => {
+      try{
+        const payload = JSON.stringify(obj, null, 2);
+        const ts = new Date().toISOString().replace(/[:.]/g,'-');
+        const blob = new Blob([payload], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = filename || `trackr-backup-${ts}.json`; a.click(); URL.revokeObjectURL(url);
+      }catch(e){ alert('Export failed'); }
+    };
+
+    // --- settings modal buttons (existing IDs)
+    const expBtn = document.getElementById('btnSettingsExportJSON');
+    const impBtn = document.getElementById('btnSettingsImportJSON');
+    const fileInput = document.getElementById('settingsImportFile');
+
+    if (expBtn){
+      expBtn.replaceWith(expBtn.cloneNode(true));
+      const newExp = document.getElementById('btnSettingsExportJSON');
+      if (newExp) newExp.addEventListener('click', ()=> doDownload(`trackr-backup-${new Date().toISOString().slice(0,10)}.json`, { state: getState(), ledger: getLedger() }));
+    }
+
+    if (impBtn && fileInput){
+      impBtn.replaceWith(impBtn.cloneNode(true));
+      const newImp = document.getElementById('btnSettingsImportJSON');
+      if (newImp) newImp.addEventListener('click', ()=> fileInput.click());
+
+      const fiClone = fileInput.cloneNode(true);
+      fileInput.parentNode.replaceChild(fiClone, fileInput);
+      // shared import handler that accepts several shapes:
+      // - { state: {...}, ledger: [...] }
+      // - raw state object (contains people/categories)
+      // - an array (treated as ledger)
+      function handleImportText(text){
+        let parsed;
+        try{ parsed = JSON.parse(text); }catch(err){ console.error('Parse error', err); alert('Could not parse JSON'); return; }
+        console.log('Import parsed', parsed);
+        // If wrapper with state/ledger
+        if (parsed && typeof parsed === 'object' && (parsed.state || parsed.ledger)){
+          if (parsed.state && typeof parsed.state === 'object') setState(parsed.state);
+          if (Array.isArray(parsed.ledger)) setLedger(parsed.ledger);
+          else if (parsed.ledger) { alert('Imported ledger invalid (expected array)'); return; }
+          refreshApp();
+          if (settingsModal){ settingsModal.classList.add('hidden'); document.body.classList.remove('noscroll'); }
+          alert('Import successful');
+          return;
+        }
+        // If array -> treat as ledger
+        if (Array.isArray(parsed)){
+          setLedger(parsed);
+          refreshApp();
+          if (settingsModal){ settingsModal.classList.add('hidden'); document.body.classList.remove('noscroll'); }
+          alert('Imported ledger successfully');
+          return;
+        }
+        // If object that looks like state (has people & categories)
+        if (parsed && typeof parsed === 'object' && (parsed.people || parsed.categories)){
+          setState(parsed);
+          refreshApp();
+          if (settingsModal){ settingsModal.classList.add('hidden'); document.body.classList.remove('noscroll'); }
+          alert('Imported state successfully');
+          return;
+        }
+        alert('Unrecognized JSON structure. Expected {state,ledger}, a state object, or an array ledger.');
+      }
+
+      fiClone.addEventListener('change', (ev)=>{
+        const f = ev.target.files && ev.target.files[0]; if (!f) return;
+        const reader = new FileReader();
+        reader.onload = (e) => handleImportText(String(e.target.result));
+        reader.onerror = (e)=> { console.error('FileReader error', e); alert('Failed to read file'); };
+        reader.readAsText(f);
+        ev.target.value = '';
+      });
+    }
+
+    // --- support for alternative IDs requested by user ---
+    // Export button with id 'btnExportJson'
+    const altExp = document.getElementById('btnExportJson');
+    if (altExp){
+      altExp.onclick = ()=>{
+        const filename = `Trackr-backup-${new Date().toISOString().slice(0,10)}.json`;
+        doDownload(filename, { state: getState(), ledger: getLedger() });
+      };
+    }
+
+    // Import input with id 'importJson'
+    const altImp = document.getElementById('importJson');
+    if (altImp){
+      altImp.onchange = (e)=>{
+        const file = e.target.files && e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev)=> handleImportText(String(ev.target.result));
+        reader.onerror = (ev)=> { console.error('FileReader error', ev); alert('Failed to read file'); };
+        reader.readAsText(file);
+      };
+    }
+   }
+   // initial attach
+   attachExportImportHandlers();
+
+  // Expose a simple export function for inline onclick wiring
+  window.doExport = function(){
+    try{
+      const payload = JSON.stringify({ state: getState(), ledger: getLedger() }, null, 2);
+      const ts = new Date().toISOString().replace(/[:.]/g,'-');
+      const blob = new Blob([payload], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `trackr-backup-${ts}.json`; a.click(); URL.revokeObjectURL(url);
+    }catch(e){ alert('Export failed'); }
+  };
 })();
