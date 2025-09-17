@@ -2,36 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
-
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
   <title>Trackr — Budget & Expense Tracker</title>
 
-  <!-- Theme colors -->
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css" />
+
   <meta name="theme-color" content="#006666" />
+  <!-- iOS home screen icons and PWA meta -->
+  <link rel="apple-touch-icon" sizes="180x180" href="/icon-192.png" />
+  <link rel="apple-touch-icon" sizes="152x152" href="/icon-192.png" />
+  <link rel="apple-touch-icon" sizes="167x167" href="/icon-192.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="mobile-web-app-capable" content="yes" />
-
-  <!-- Manifest (Android / Chrome / desktop PWA) -->
-  <link rel="manifest" href="/manifest.json" />
-
-  <!-- Favicons (browser tabs, Android, fallback) -->
-  <link rel="icon" href="icon-192.png" sizes="192x192" type="image/png" />
-  <link rel="shortcut icon" href="icon-192.png" type="image/png" />
-
-  <!-- iOS home screen icon (auto-resizes if no sizes specified) -->
-  <link rel="apple-touch-icon" href="icon-192.png" />
-
-  <!-- (Optional) Safari pinned tab (monochrome SVG) -->
-  <!-- <link rel="mask-icon" href="icons/icon.svg" color="#006666" /> -->
-
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&display=swap" rel="stylesheet" />
-
-  <!-- App styles -->
-  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="appbar">
@@ -115,6 +102,13 @@
           <div class="big" id="cardContributions">₱0.00</div>
           <p class="muted small">Sum of contributions logged this month.</p>
         </div>
+
+        <div class="card">
+          <h4>Cash on Hand</h4>
+          <div class="big" id="cardCashOnHand">₱0.00</div>
+          <p class="muted small">Contributions − Actual Spend</p>
+        </div>
+
       </div>
 
       <div class="panel">
@@ -233,7 +227,17 @@
         </div>
         <p class="muted small">Changes apply going forward and to calculations (past months recompute to the latest budgets/people). Google Sheets sync hooks are included in code for later.</p>
 
-        <!-- Backups UI removed -->
+        <!-- Export / Import JSON -->
+        <hr style="opacity:.08;margin:16px 0;" />
+        <div>
+          <h4>Export / Import</h4>
+          <p class="muted small">Export your data to a JSON file or import a previously exported file to restore state.</p>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+            <button id="btnSettingsExportJSON" class="btn">Export JSON</button>
+            <button id="btnSettingsImportJSON" class="btn ghost">Import JSON</button>
+            <input id="settingsImportFile" type="file" accept="application/json" style="display:none" />
+          </div>
+        </div>
 
       </div>
       <div class="modal-foot">
