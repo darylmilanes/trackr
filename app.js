@@ -303,6 +303,24 @@
   const setLastMonth = (m) => localStorage.setItem(LS.LAST_MONTH, m);
   const getLastMonth = () => localStorage.getItem(LS.LAST_MONTH);
 
+  // Currently editing entry id (null = creating new)
+  let editingEntryId = null;
+
+  function openEditEntry(id){
+    const entry = getLedger().find(x=> x.id === id);
+    if (!entry) return;
+    // Prefill modal
+    $('#entryDate').value = entry.date || todayStr();
+    populateEntryTargetSelect();
+    $('#entryTarget').value = entry.personId || entry.categoryId || '';
+    // show positive amount in input
+    $('#entryAmount').value = (Math.abs(entry.amountCents)/100).toFixed(2);
+    $('#entryNotes').value = entry.notes || '';
+    editingEntryId = id;
+    document.body.classList.add('noscroll');
+    $('#entryModal').classList.remove('hidden');
+  }
+
   // ---------- Initial Boot ----------
   const state = getState();
   if (!state) {
@@ -785,9 +803,20 @@
         <td>${escapeHtml(targetLabel)}</td>
         <td class="right">${formatPHP(e.amountCents)}</td>
         <td>${escapeHtml(e.notes||'')}</td>
-        <td class="right"><button class="icon-btn del-btn" data-id="${e.id}" title="Delete">🗑</button></td>
+        <td class="right">
+          <button class="icon-btn edit-btn" data-id="${e.id}" title="Edit">✎</button>
+          <button class="icon-btn del-btn" data-id="${e.id}" title="Delete">🗑</button>
+        </td>
       `;
       body.appendChild(tr);
+    });
+
+    // wire edit buttons
+    body.querySelectorAll('.edit-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.dataset.id;
+        openEditEntry(id);
+      });
     });
 
     body.querySelectorAll('.del-btn').forEach(btn=>{
@@ -834,6 +863,7 @@
   }
 
   $('#btnAddEntry').addEventListener('click', ()=>{
+    editingEntryId = null; // ensure create mode
     $('#entryDate').value = todayStr();
     populateEntryTargetSelect();
     $('#entryAmount').value = '';
@@ -842,6 +872,8 @@
     $('#entryModal').classList.remove('hidden');
   });
   $('#closeEntryModal').addEventListener('click', ()=>{
+    // clear editing state when closing
+    editingEntryId = null;
     $('#entryModal').classList.add('hidden');
     document.body.classList.remove('noscroll');
   });
@@ -856,22 +888,38 @@
     if (!amount || amount <= 0){ alert('Enter a positive amount.'); return; }
 
     const kind = target.startsWith('p:') ? 'contribution' : 'expense';
-    const entry = {
-      id: uid('tx'),
-      date, notes,
-      amountCents: kind === 'contribution' ? amount : -amount,
-      kind,
-      personId: kind==='contribution' ? target : null,
-      categoryId: kind==='expense' ? target : null,
-      createdAt: new Date().toISOString()
-    };
+    // If editing an existing entry, update it; otherwise create new
     const arr = getLedger();
-    arr.push(entry);
-    setLedger(arr);
+    if (editingEntryId){
+      const idx = arr.findIndex(x=> x.id === editingEntryId);
+      if (idx !== -1){
+        arr[idx].date = date;
+        arr[idx].notes = notes;
+        arr[idx].amountCents = (kind === 'contribution') ? amount : -amount;
+        arr[idx].kind = kind;
+        arr[idx].personId = kind === 'contribution' ? target : null;
+        arr[idx].categoryId = kind === 'expense' ? target : null;
+        arr[idx].updatedAt = new Date().toISOString();
+        setLedger(arr);
+        // notify cloud of the updated entry
+        Cloud.pushEntry(arr[idx]);
+      }
+    } else {
+      const entry = {
+        id: uid('tx'),
+        date, notes,
+        amountCents: kind === 'contribution' ? amount : -amount,
+        kind,
+        personId: kind==='contribution' ? target : null,
+        categoryId: kind==='expense' ? target : null,
+        createdAt: new Date().toISOString()
+      };
+      arr.push(entry);
+      setLedger(arr);
+      Cloud.pushEntry(entry);
+    }
 
-    // NEW: push to Google Apps Script (fire-and-forget)
-    Cloud.pushEntry(entry);
-
+    editingEntryId = null;
     $('#entryModal').classList.add('hidden');
     document.body.classList.remove('noscroll');
     refreshApp();
